@@ -16,11 +16,16 @@
  #include <iomanip>
  #include <ios>
  #include <string>
-
+ #include <boost/random/mersenne_twister.hpp>
+ #include <boost/version.hpp>
+ //#include <boost/random/uniform_int_distribution.hpp> //boost > 1.46
+ #include <boost/random/uniform_int.hpp> //boost < 1.47
+ #include <boost/random/variate_generator.hpp>
  using namespace std;
 
 int main(int argc, char *argv[] )
 {
+    cout << "Boost version: " << BOOST_LIB_VERSION<<endl;
     string offered_filename;
     int max_samples;
     string out_filename;
@@ -62,25 +67,22 @@ int main(int argc, char *argv[] )
     // do real stuff with size
     cout << "File " << offered_filename << " is " <<size<<" bytes long.\n";
     int samples = 0;
+//    boost::mt19937_64 gen; // boost > 1.46
+    boost::rand48 gen; //boost < 1.47
     while (samples < max_samples) {
-        if (size < RAND_MAX ) {
-            srand(time(NULL)+samples);//figure out boost rand function
-            int r;
-            int bucket_size=RAND_MAX/size;
-            string buffer;
-            do r=rand()/bucket_size;
-            while (r>=size);
-            myfile.seekg(r,myfile.beg);
+        boost::uniform_int<> dist(1, size);
+//      boost::variate_generator<boost::mt19937_64&, boost::uniform_int<> > position(gen, dist);
+        boost::variate_generator<boost::rand48&, boost::uniform_int<> > position(gen, dist);
+        int random_position = position();
+        myfile.seekg(random_position,myfile.beg);
+        string buffer;
+        getline(myfile,buffer);
+        while (identifier != buffer.substr(0,buffer.find(':'))) {
             getline(myfile,buffer);
-            while (identifier != buffer.substr(0,buffer.find(':'))) {
-                getline(myfile,buffer);
-            }
-            for (int i=0;i<4;++i) {
-                outfile << buffer <<endl;
-                getline(myfile,buffer);
-            }
-        } else {
-            cout << "Code to deal with very large files not yet written\n";
+        }
+        for (int i=0;i<4;++i) {
+            outfile << buffer <<endl;
+            getline(myfile,buffer);
         }
         ++samples;
     }
