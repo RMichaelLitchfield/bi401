@@ -19,11 +19,12 @@
  #include <string>
  #include <boost/random/mersenne_twister.hpp>
  #include <boost/version.hpp>
- //#include <boost/random/uniform_int_distribution.hpp> //boost > 1.46
- #include <boost/random/uniform_int.hpp> //boost < 1.47
+ #include <boost/random/uniform_int_distribution.hpp> //boost > 1.46
+ //#include <boost/random/uniform_int.hpp> //boost < 1.47
  #include <boost/random/variate_generator.hpp>
  #include <boost/program_options.hpp>
  #include <boost/algorithm/string.hpp>
+ #include <boost/algorithm/string/predicate.hpp>
  /*
  #include <boost/program_options/options_description.hpp>
  #include <boost/program_options/parsers.hpp>
@@ -39,47 +40,48 @@ int main(int argc, char *argv[] )
     string offered_filename;
     int max_samples;
     string out_filename;
-    bool noreplace;
+    bool noreplace = false;
     vector<int> samplelist;
     int record_position;
     po::options_description desc("Allowed options");
     desc.add_options()
         ("help,h", "usage help")
-        ("samples,s", po::value<int>(&max_samples)->default_value(300), "number of samples (default 300)")
-        ("input-file,i", po::value<string>(&offered_filename), "input file")
-        ("output-file,o", "output file (default 'sample-<input file>')")
-        ("noreplace,n", "will samples be unique (noreplace) (default false)")
+        ("samples,s ", po::value<int>(&max_samples)->default_value(300), "number of samples (default 300)")
+        ("input-file,i ", po::value<string>(&offered_filename), "input file")
+        ("output-file,o ", po::value<string>(&out_filename),"output file (default 'sample-<input file>')")
+        ("noreplace,n ", "will samples be unique (noreplace) (default false)")
         ;
-    po::positional_options_description positionalOptions; 
-    positionalOptions.add("input-file", 1); 
+    po::positional_options_description positionalOptions;
+    positionalOptions.add("input-file", 1);
     po::variables_map vm;
-    po::store(po::command_line_parser(argc, argv).options(desc) 
+    po::store(po::command_line_parser(argc, argv).options(desc)
             .positional(positionalOptions).run(), 
-          vm); 
+          vm);
     //po::store(po::parse_command_line(argc, argv, desc), vm);
+    po::notify(vm);
     if (vm.count("help")) {
         cout<<"Commands for controlling sampler"<<endl<<desc<<endl;
+        return-1;
     }
     if (!vm.count("input-file")) {
         cout<<"No input file offered\n";
         return -1;
     }
-    /* getting weird errors with this
-    if ( !boost::algorithm::endswith(vm.count("input-file"),"fastq") {
-        cout<<"This is not a fastq file\n";
-        return-1
+    //getting weird errors with this
+    if ( !boost::iends_with(offered_filename,".fastq") ) {
+        cout<<offered_filename<<" does not end in fastq\n";
+        return -1;
     }
-    */
     if (!vm.count("output-file")) {
         out_filename = "sample-" + offered_filename;
+        cout<<"Writing to " << out_filename << " as no output file was"
+        	" specified.\n";
     }
     if (vm.count("noreplace")) {
         noreplace = true;
-    } else {
-        noreplace = false;
+        cout<<"Noreplace (no duplicate samples) is active\n";
     }
-    po::notify(vm);
-    cout<<"Offered file: "<<offered_filename<<".\n";
+    cout<<"Offered file: "<< offered_filename <<".\n";
     bool paired = true;
     if ( offered_filename.find(".1.") == string::npos) { //if filename doesn't have '.1.'
         paired = false;
@@ -105,8 +107,18 @@ int main(int argc, char *argv[] )
     //    getfile
     ifstream myfile;
     ofstream outfile;
-    myfile.open (offered_filename);
-    outfile.open (out_filename);
+    myfile.open(offered_filename);
+    outfile.open(out_filename);
+	ifstream myotherfile;
+	ofstream outfile2;
+    if (paired) {
+    	string infile2 = offered_filename;
+    	string out2_filename = out_filename;
+    	boost::replace_first(infile2, ".1.",".2.");
+    	boost::replace_first(out2_filename, ".1.",".2.");
+        myotherfile.open (infile2);
+        outfile2.open (out2_filename);
+    }
     //read first fastq record to use as a recognition template
     string record[4];
     if (myfile.is_open()) {
@@ -124,47 +136,78 @@ int main(int argc, char *argv[] )
     size = myfile.tellg();
     // do real stuff with size
     int samples = 0;
-    //boost::mt19937_64 gen; // boost > 1.46
-    boost::rand48 gen(goodseed()); //boost < 1.47
-    boost::uniform_int<> dist(1, size);
-    //boost::variate_generator<boost::mt19937_64&, boost::uniform_int<> > position(gen, dist);
-    boost::variate_generator<boost::rand48&, boost::uniform_int<> > position(gen, dist);
+    boost::random::mt19937_64 gen(goodseed()); // boost > 1.46
+    //boost::rand48 gen(goodseed()); //boost < 1.47
+    boost::random::uniform_int_distribution<> dist(1, size);
+    boost::variate_generator<boost::mt19937_64&, boost::random::uniform_int_distribution<> > position(gen, dist);
+    //boost::variate_generator<boost::rand48&, boost::uniform_int<> > position(gen, dist);
+	int loopdetect = 0;
     while (samples < max_samples) {
-        cout<<"Getting sample "<<samples<<" of "<<max_samples<<endl;
+        //cout<<"Getting sample "<< samples+1 <<" of "<<max_samples<<endl;
         int random_position = position();
-        cout<<"random position: "<<random_position<<"\n";
+        //cout<<"random position: "<<random_position<<"\n";
         myfile.seekg(random_position,myfile.beg);
-        string buffer;
-        getline(myfile,buffer);
-        cout<<"line: "<<buffer<<".\n";
-        record_position = myfile.tellg();
-        cout<<"1record position: "<<record_position<<"\n";
-        if (noreplace) {
-            cout<<"Operating under noreplace\n";
-            //while item is not in list
-            if (find(samplelist.begin(),samplelist.end(),record_position) != samplelist.end()) {
-                cout<<"Skipping record at position "<<record_position<<endl;
-                getline(myfile,buffer);
-            }
+        if (paired){
+        	myotherfile.seekg(record_position,myotherfile.beg);
         }
-        while (!myfile.eof()) {
-            while (identifier != buffer.substr(0,buffer.find(':'))) {
+        string buffer;
+        string buffer2;
+        bool goodrecord = true;
+        if (!myfile.eof()) {
+        	getline(myfile,buffer);
+        	if (paired){
+        		getline(myotherfile,buffer2);
+        	}
+        }
+        //cout<<"line: "<<buffer<<".\n";
+        if (!myfile.eof()) {
+            while (identifier != buffer.substr(0,buffer.find(':')) && (!myfile.eof())){
+                //cout<< "this is not a start record:\n"<<buffer<<".\n";
                 getline(myfile,buffer);
+            	if (paired){
+            		getline(myotherfile,buffer2);
+            	}
             }
-            samplelist.push_back(record_position);
-            for (int i=0;i<4;++i) {
-                outfile << buffer <<endl;
-                getline(myfile,buffer);
+            record_position = myfile.tellg();
+            //cout<<"1record position: "<<record_position<<"\n";
+            if (noreplace) {
+                //cout<<"Operating under noreplace\n";
+                //while item is not in list
+                if (find(samplelist.begin(),samplelist.end(),record_position) != samplelist.end()) {
+                    //cout<<"Skipping record at position "<<record_position<<endl;
+                    goodrecord = false;
+                }
             }
-            ++samples;
+            if (!myfile.eof() && (goodrecord)) {
+					samplelist.push_back(record_position);
+					//cout << "Writing record at "<<record_position<<".\n";
+					for (int i=0;i<4;++i) {
+						outfile << buffer <<endl;
+						getline(myfile,buffer);
+			        	if (paired){
+			        		outfile2<<buffer2<<endl;
+			        		getline(myotherfile,buffer2);
+			        	}
+					}
+					++samples;
+					loopdetect = 0;
+				}
         }
         if (myfile.eof()) {
-            cout << "EOF reached" << endl;
+            //cout << "EOF reached" << endl;
             myfile.clear();
+        	if (paired){
+        		myotherfile.clear();
+        	}
         }
+    ++loopdetect;
+    if (loopdetect == 100) {
+    	cout<<"Unable to find "<<max_samples<<" creating a file with "<<samples<<" samples.\n";
+    	samples = max_samples;
+    }
     }
     //  call report class report;
-    cout << max_samples << " samples taken and put in " << out_filename << ".\n";
+    //cout << max_samples << " samples taken and put in " << out_filename << ". \n";
     cout << "Got record at positions:";
     for( vector<int>::const_iterator i = samplelist.begin(); i != samplelist.end(); ++i){
         std::cout << *i << ' ';
@@ -172,6 +215,10 @@ int main(int argc, char *argv[] )
     cout <<endl;
     myfile.close();
     outfile.close();
+	if (paired){
+		myotherfile.close();
+		outfile2.close();
+	}
     return 0;
 }
 unsigned int goodseed() {
