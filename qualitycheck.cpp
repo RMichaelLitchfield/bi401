@@ -116,6 +116,7 @@ int main(int argc, char *argv[] )
     	string out2_filename = out_filename;
     	boost::replace_first(infile2, ".1.",".2.");
     	boost::replace_first(out2_filename, ".1.",".2.");
+    	cout<<"Paired file so will draw from "<<infile2<<"and write those samples to "<<out2_filename<<".\n";
         myotherfile.open (infile2);
         outfile2.open (out2_filename);
     }
@@ -148,7 +149,7 @@ int main(int argc, char *argv[] )
         //cout<<"random position: "<<random_position<<"\n";
         myfile.seekg(random_position,myfile.beg);
         if (paired){
-        	myotherfile.seekg(record_position,myotherfile.beg);
+        	myotherfile.seekg(random_position,myotherfile.beg);
         }
         string buffer;
         string buffer2;
@@ -207,7 +208,7 @@ int main(int argc, char *argv[] )
     }
     }
     //  call report class report;
-    //cout << max_samples << " samples taken and put in " << out_filename << ". \n";
+    cout << max_samples << " samples taken and put in " << out_filename << ". \n";
     cout << "Got record at positions:";
     for( vector<int>::const_iterator i = samplelist.begin(); i != samplelist.end(); ++i){
         std::cout << *i << ' ';
