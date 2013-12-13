@@ -20,16 +20,11 @@
  #include <boost/random/mersenne_twister.hpp>
  #include <boost/version.hpp>
  #include <boost/random/uniform_int_distribution.hpp> //boost > 1.46
- //#include <boost/random/uniform_int.hpp> //boost < 1.47
  #include <boost/random/variate_generator.hpp>
  #include <boost/program_options.hpp>
  #include <boost/algorithm/string.hpp>
  #include <boost/algorithm/string/predicate.hpp>
- /*
- #include <boost/program_options/options_description.hpp>
- #include <boost/program_options/parsers.hpp>
- #include <boost/program_options/variables_map.hpp>
- */
+
 using namespace std;
 namespace po = boost::program_options;
 
@@ -47,9 +42,10 @@ int main(int argc, char *argv[] )
     desc.add_options()
         ("help,h", "usage help")
         ("samples,s ", po::value<int>(&max_samples)->default_value(300), "number of samples (default 300)")
-        ("input-file,i ", po::value<string>(&offered_filename), "input file")
+        ("input-file,i ", po::value<string>(&offered_filename), "input file (if filename has '.1.' in name "
+        		"it will be treated as paired end and a second '.2.' file will be expected)")
         ("output-file,o ", po::value<string>(&out_filename),"output file (default 'sample-<input file>')")
-        ("noreplace,n ", "will samples be unique (noreplace) (default false)")
+        ("noreplace,n ", "samples will be unique (noreplace) (default false)")
         ;
     po::positional_options_description positionalOptions;
     positionalOptions.add("input-file", 1);
@@ -67,7 +63,6 @@ int main(int argc, char *argv[] )
         cout<<"No input file offered\n";
         return -1;
     }
-    //getting weird errors with this
     if ( !boost::iends_with(offered_filename,".fastq") ) {
         cout<<offered_filename<<" does not end in fastq\n";
         return -1;
@@ -81,34 +76,17 @@ int main(int argc, char *argv[] )
         noreplace = true;
         cout<<"Noreplace (no duplicate samples) is active\n";
     }
-    cout<<"Offered file: "<< offered_filename <<".\n";
     bool paired = true;
     if ( offered_filename.find(".1.") == string::npos) { //if filename doesn't have '.1.'
         paired = false;
-        cout<<"This is not a paired end file\n";
+        //cout<<"This is not a paired end file\n";
     }
-/*  relic from pre-boost  commandline tools
-    if ((argc<2) || argc>5) { // need two to four arguments (argc) to work
-        // argv[0] is the program name
-        cout<<"usage: "<< argv[0] <<" <filename> <number of samples> <outputfilename> <-n no replacement flag<\n";
-        return -1;
-    } else {
-        //argv[1] is the file to be samples
-        offered_filename = argv[1];
-        if (argv[2] != NULL) {//argv[2] is the number of samples
-            max_samples = atoi(argv[2]);
-            out_filename = argv[3];//argv[3] is the output filename
-        } else {
-            max_samples = 300;
-            out_filename = "sample" + offered_filename;
-        }
-        (argv[4] == "-n") ? noreplace = true:noreplace=false;
-    }*/
-    //    getfile
+    //    get from offered_filename and output to out_filename
     ifstream myfile;
     ofstream outfile;
     myfile.open(offered_filename);
     outfile.open(out_filename);
+    //if it is a paired end filename get from ".2" version of offered filename
 	ifstream myotherfile;
 	ofstream outfile2;
     if (paired) {
@@ -116,16 +94,18 @@ int main(int argc, char *argv[] )
     	string out2_filename = out_filename;
     	boost::replace_first(infile2, ".1.",".2.");
     	boost::replace_first(out2_filename, ".1.",".2.");
-    	cout<<"Paired file so will draw from "<<infile2<<"and write those samples to "<<out2_filename<<".\n";
+    	cout<<"Paired file so will draw from "<<infile2<<" and write those samples to "<<out2_filename<<".\n";
         myotherfile.open (infile2);
         outfile2.open (out2_filename);
     }
     //read first fastq record to use as a recognition template
     string record[4];
+    int sample_length;
     if (myfile.is_open()) {
         for (int i=0; i<4;++i) {
             getline(myfile,record[i]);
         }
+        sample_length = myfile.tellg();
     } else {
         std::cout << "\nThere was a problem opening that file.\n";
         return -1;
@@ -138,15 +118,16 @@ int main(int argc, char *argv[] )
     // do real stuff with size
     int samples = 0;
     boost::random::mt19937_64 gen(goodseed()); // boost > 1.46
-    //boost::rand48 gen(goodseed()); //boost < 1.47
     boost::random::uniform_int_distribution<> dist(1, size);
     boost::variate_generator<boost::mt19937_64&, boost::random::uniform_int_distribution<> > position(gen, dist);
-    //boost::variate_generator<boost::rand48&, boost::uniform_int<> > position(gen, dist);
 	int loopdetect = 0;
     while (samples < max_samples) {
         //cout<<"Getting sample "<< samples+1 <<" of "<<max_samples<<endl;
+    	//Pick a random location in the source file, move back one sample length (or to 0 in first sample)
         int random_position = position();
-        //cout<<"random position: "<<random_position<<"\n";
+		if (random_position > (sample_length) ){
+			random_position -= (sample_length);
+		} else random_position = 0;
         myfile.seekg(random_position,myfile.beg);
         if (paired){
         	myotherfile.seekg(random_position,myotherfile.beg);
@@ -162,6 +143,7 @@ int main(int argc, char *argv[] )
         }
         //cout<<"line: "<<buffer<<".\n";
         if (!myfile.eof()) {
+        	//use illumina machine name as identifier to determine start of sample
             while (identifier != buffer.substr(0,buffer.find(':')) && (!myfile.eof())){
                 //cout<< "this is not a start record:\n"<<buffer<<".\n";
                 getline(myfile,buffer);
@@ -173,7 +155,7 @@ int main(int argc, char *argv[] )
             //cout<<"1record position: "<<record_position<<"\n";
             if (noreplace) {
                 //cout<<"Operating under noreplace\n";
-                //while item is not in list
+                //if item is in list of used sample, don't use it again
                 if (find(samplelist.begin(),samplelist.end(),record_position) != samplelist.end()) {
                     //cout<<"Skipping record at position "<<record_position<<endl;
                     goodrecord = false;
@@ -181,8 +163,10 @@ int main(int argc, char *argv[] )
             }
             if (!myfile.eof() && (goodrecord)) {
 					samplelist.push_back(record_position);
+					//cout<<record_position<<endl;
 					//cout << "Writing record at "<<record_position<<".\n";
 					for (int i=0;i<4;++i) {
+						//send 4 lines of sample to outfile
 						outfile << buffer <<endl;
 						getline(myfile,buffer);
 			        	if (paired){
@@ -207,13 +191,6 @@ int main(int argc, char *argv[] )
     	samples = max_samples;
     }
     }
-    //  call report class report;
-    cout << max_samples << " samples taken and put in " << out_filename << ". \n";
-    cout << "Got record at positions:";
-    for( vector<int>::const_iterator i = samplelist.begin(); i != samplelist.end(); ++i){
-        std::cout << *i << ' ';
-    }
-    cout <<endl;
     myfile.close();
     outfile.close();
 	if (paired){
@@ -222,6 +199,9 @@ int main(int argc, char *argv[] )
 	}
     return 0;
 }
+/* goodseed() routine was obtained from:
+ * http://stackoverflow.com/questions/2640717/c-generate-a-good-random-seed-for-psudo-random-number-generators
+ */
 unsigned int goodseed() {
     unsigned int random_seed, random_seed_a, random_seed_b; 
     std::ifstream file ("/dev/urandom", std::ios::binary);
